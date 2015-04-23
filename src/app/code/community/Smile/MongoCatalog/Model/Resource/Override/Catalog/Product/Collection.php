@@ -398,7 +398,9 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
                 $result['$or'][0]['$and'][] = array($scopedAttributeName => array('$' . $type => $filterValue));
                 $result['$or'][1]['$and'][] = array($globalAttributeName => array('$' . $type => $filterValue));
             } else {
-                Mage::throwException("{__FILE__} {$type} : unsuported MongoDB attribute filter");
+                // @FIX
+                $file = __FILE__;
+                Mage::throwException("{$file} {$type} : unsuported MongoDB attribute filter");
             }
         }
 
