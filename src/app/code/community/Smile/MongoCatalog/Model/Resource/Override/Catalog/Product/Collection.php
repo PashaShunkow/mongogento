@@ -26,6 +26,9 @@
  */
 class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection extends Mage_Catalog_Model_Resource_Product_Collection
 {
+    const MONGO_OPERATOR_OR  = '$or';
+
+    const MONGO_OPERATOR_AND = '$and';
     /**
      * This collection is used to access to the product collection into MongoDB
      *
@@ -61,6 +64,27 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
      * Default not loaded, the id remain interger
      */
     protected $_addMainCategories = false;
+
+    /**
+     * Result array with filter conditions
+     *
+     * @var array
+     */
+    protected $_result = array();
+
+    /**
+     * Mongo equivalents of Magento Sql operators
+     *
+     * @var array
+     */
+    protected $_operatorsMap = array(
+            'gteq'  => 'gte',
+            'moreq' => 'gte',
+            'from'  => 'gte',
+            'lteq'  => 'lte',
+            'neq'   => 'ne',
+            'to'    => 'lt'
+        );
 
      /**
      * Set flag to load main category
@@ -208,6 +232,8 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
 
         $sqlAttributes = $this->getResource()->getSqlAttributesCodes();
 
+        unset($sqlAttributes[18]);
+
         if (is_array($attribute)) {
             $sqlArr = array();
             foreach ($attribute as $condition) {
@@ -300,7 +326,11 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
             while ($cursor->hasNext()) {
                 $document = $cursor->getNext();
                 $documentIds[] = $document['_id'];
+                var_dump($document);
             }
+            //$log = $cursor->explain();
+            //var_dump(json_encode($log['queryPlanner']['parsedQuery']));
+            die('1');
 
             $this->getSelect()->where('e.entity_id IN(?)', $documentIds);
         }
@@ -313,98 +343,222 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
      * - array("eq" => $equalValue)                       [OK]
      * - array("neq" => $notEqualValue)                   [OK]
      * - array("like" => $likeValue)                      [OK]
-     * - array("in" => array($inValues))                  [NOT IMPLEMENTED]
-     * - array("nin" => array($notInValues))              [NOT IMPLEMENTED]
-     * - array("notnull" => $valueIsNotNull)              [NOT IMPLEMENTED]
-     * - array("null" => $valueIsNull)                    [NOT IMPLEMENTED]
+     * - array("in" => array($inValues))                  [OK]
+     * - array("nin" => array($notInValues))              [OK]
+     * - array("notnull" => $valueIsNotNull)              [OK]
+     * - array("null" => $valueIsNull)                    [OK]
      * - array("moreq" => $moreOrEqualValue)              [OK]
      * - array("gt" => $greaterValue)                     [OK]
      * - array("lt" => $lessValue)                        [OK]
      * - array("gteq" => $greaterOrEqualValue)            [OK]
      * - array("lteq" => $lessOrEqualValue)               [OK]
      * - array("finset" => $valueInSet)                   [NOT IMPLEMENTED]
-     * - array("regexp" => $regularExpression)            [NOT IMPLEMENTED]
-     * - array("seq" => $stringValue)                     [NOT IMPLEMENTED]
-     * - array("sneq" => $stringValue)                    [NOT IMPLEMENTED]
+     * - array("regexp" => $regularExpression)            [OK]
+     * - array("seq" => $stringValue)                     [OK]
+     * - array("sneq" => $stringValue)                    [OK]
      *
-     * @param Mage_Eav_Model_Entity_Attribute_Interface|integer|string|array $attribute The attribute to be filtered
-     * @param null|string|array                                              $filter    Filter condition array or value
+     * @param Mage_Eav_Model_Entity_Attribute_Interface|integer|string|array $attribute     The attribute to be filtered
+     * @param null|string|array                                              $filter        Filter condition array or value
+     * @param string                                                         $logicOperator Could be specified as $or/$and
      *
      * @return array The Filter to be applied
      */
-    protected function _buildDocumentFilter($attribute, $filter)
+    protected function _buildDocumentFilter($attribute, $filter, $logicOperator = '$or')
     {
-
-        $result = null;
-
         $condition = $filter['condition'];
 
         if (!is_array($condition)) {
             $condition = array('eq' => $condition);
         }
 
-        if (count($condition) > 1) {
-            $result = array('$or' => array());
+        if (count($condition) > 1 && !(isset($condition['from']) && isset($condition['to']))) {
+            $this->_setResultArray(array(static::MONGO_OPERATOR_OR => array()));
             foreach ($condition as $currentCondition) {
-                $result['$or'][] = $this->_buildDocumentFilter($attribute, $currentCondition);
+                $this->_result[static::MONGO_OPERATOR_OR][] = $this->_buildDocumentFilter($attribute, $currentCondition);
             }
         } else {
-
+            if(isset($condition['from']) && isset($condition['to'])){
+                $condition = array(
+                    'from-to' => $condition['from'] . ';' . $condition['to']
+                );
+            }
             list($type) = array_keys($condition);
 
             $scopedAttributeName = 'attr_' . $this->getStoreId() . '.' . $attribute;
             $globalAttributeName = 'attr_' . Mage_Core_Model_App::ADMIN_STORE_ID . '.' . $attribute;
             $resultCascade = array(
-                '$or' => array(
-                    array('$and'=> array(
+                static::MONGO_OPERATOR_OR => array(
+                    array(static::MONGO_OPERATOR_AND => array(
                         array($scopedAttributeName => array('$exists' => 1)),
 
                     )),
-                    array('$and'=> array(
+                    array(static::MONGO_OPERATOR_AND => array(
                         array($scopedAttributeName => array('$exists' => 0)),
                         array($globalAttributeName => array('$exists' => 1)),
                     )),
                 )
             );
 
-            if ($type == 'or' || $type == 'and') {
-                $result = array("${$type}" => array());
-                foreach ($condition as $currentCondition) {
-                    $result['${$type}'][] = $this->_buildDocumentFilter($attribute, $currentCondition);
-                }
-            } else if ($type == 'like') {
-                $regexp = new MongoRegex('/' . str_replace(array('\'%','%\''), '.*', $condition[$type]) . '/i');
-                $result = $resultCascade;
-                $result['$or'][0]['$and'][] = array($scopedAttributeName => array('$regex' => $regexp));
-                $result['$or'][1]['$and'][] = array($globalAttributeName => array('$regex' => $regexp));
-            } else if ($type == 'eq') {
-                $result = $resultCascade;
-                $result['$or'][0]['$and'][] = array($scopedAttributeName => $condition[$type]);
-                $result['$or'][1]['$and'][] = array($globalAttributeName => $condition[$type]);
+            $this->_setResultArray($resultCascade);
 
-            } else if (in_array($type, array('gt', 'gteq', 'lt', 'lteq', 'moreq', 'neq'))) {
-
-                $result      = $resultCascade;
-                $filterValue = (string) $condition[$type];
-
-                if (in_array($type, array('gteq', 'moreq'))) {
-                    $type = 'gte';
-                } else if ($type == 'lteq') {
-                    $type = 'lte';
-                } else if ($type == 'neq') {
-                    $type = 'ne';
-                }
-
-                $result['$or'][0]['$and'][] = array($scopedAttributeName => array('$' . $type => $filterValue));
-                $result['$or'][1]['$and'][] = array($globalAttributeName => array('$' . $type => $filterValue));
-            } else {
-                // @FIX
-                $file = __FILE__;
-                Mage::throwException("{$file} {$type} : unsuported MongoDB attribute filter");
+            switch ($type) {
+                case 'or':
+                case 'and':
+                    $this->_setResultArray(array("${$type}" => array()));
+                    foreach ($condition as $currentCondition) {
+                        $this->_result['${$type}'][] = $this->_buildDocumentFilter($attribute, $currentCondition);
+                    }
+                    break;
+                case 'like':
+                    $regexp = new MongoRegex('/' . str_replace(array('\'%','%\''), '.*', $condition[$type]) . '/i');
+                    $this->_addToResult(array($scopedAttributeName => array('$regex' => $regexp)), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$regex' => $regexp)), 1);
+                    break;
+                case 'eq':
+                    $this->_addToResult(array($scopedAttributeName => $condition[$type]), 0);
+                    $this->_addToResult(array($globalAttributeName => $condition[$type]), 1);
+                    break;
+                case 'gt':
+                case 'gteq':
+                case 'lt':
+                case 'lteq':
+                case 'moreq':
+                case 'neq':
+                    $filterValue = (string)$condition[$type];
+                    $type = $this->_convertOperator($type);
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => $filterValue)), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => $filterValue)), 1);
+                    break;
+                case 'in':
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => $condition[$type])), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => $condition[$type])), 1);
+                    break;
+                case 'nin':
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => $condition[$type])), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => $condition[$type])), 1);
+                    break;
+                case 'notnull':
+                    $type   = 'ne';
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => null)), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => null)), 1);
+                    break;
+                case 'null':
+                    $this->_addToResult(array($scopedAttributeName => null), 0);
+                    $this->_addToResult(array($globalAttributeName => null), 1);
+                    break;
+                case 'regexp':
+                    $regexp = new MongoRegex('/' . $condition[$type] . '/i');
+                    $this->_addToResult(array($scopedAttributeName => array('$regex' => $regexp)), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$regex' => $regexp)), 1);
+                    break;
+                case 'seq':
+                    if ($condition[$type] == '') {
+                        $this->_addToResult(array($scopedAttributeName => null), 0);
+                        $this->_addToResult(array($globalAttributeName => null), 1);
+                    } else {
+                        $this->_addToResult(array($scopedAttributeName => $condition[$type]), 0);
+                        $this->_addToResult(array($globalAttributeName => $condition[$type]), 1);
+                    }
+                    break;
+                case 'sneq':
+                    if ($condition[$type] == '') {
+                        $type   = 'ne';
+                        $this->_addToResult(array($scopedAttributeName => array('$' . $type => null)), 0);
+                        $this->_addToResult(array($globalAttributeName => array('$' . $type => null)), 1);
+                    } else {
+                        $filterValue = (string)$condition[$type];
+                        $type = $this->_convertOperator($type);
+                        $this->_addToResult(array($scopedAttributeName => array('$' . $type => $filterValue)), 0);
+                        $this->_addToResult(array($globalAttributeName => array('$' . $type => $filterValue)), 1);
+                    }
+                    break;
+                case 'from':
+                    /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
+                    $dateHelper  = Mage::helper('smile_mongocatalog/date');
+                    $filterValue = (string)$condition[$type];
+                    $type = $this->_convertOperator($type);
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => $dateHelper->getMongoDateFormat($filterValue))), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => $dateHelper->getMongoDateFormat($filterValue))), 1);
+                    break;
+                case 'to':
+                    /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
+                    $dateHelper  = Mage::helper('smile_mongocatalog/date');
+                    $filterValue = (string)$condition[$type];
+                    $type = $this->_convertOperator($type);
+                    $this->_addToResult(array($scopedAttributeName => array('$' . $type => $dateHelper->getMongoDateFormat($filterValue))), 0);
+                    $this->_addToResult(array($globalAttributeName => array('$' . $type => $dateHelper->getMongoDateFormat($filterValue))), 1);
+                    break;
+                case 'from-to':
+                    /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
+                    $dateHelper  = Mage::helper('smile_mongocatalog/date');
+                    list($from, $to) = explode(';', (string)$condition[$type]);
+                    $this->_addToResult(
+                        array(
+                            $scopedAttributeName => array(
+                                '$' . $this->_convertOperator('from') => $dateHelper->getMongoDateFormat($from),
+                                '$' . $this->_convertOperator('to')   => $dateHelper->getMongoDateFormat($to)
+                            )
+                        ),
+                        0
+                    );
+                    $this->_addToResult(
+                        array(
+                            $globalAttributeName => array(
+                                '$' . $this->_convertOperator('from') => $dateHelper->getMongoDateFormat($from),
+                                '$' . $this->_convertOperator('to')   => $dateHelper->getMongoDateFormat($to)
+                            )
+                        ),
+                        1
+                    );
+                    break;
+                default:
+                    // @FIX
+                    $file = __FILE__;
+                    Mage::throwException("{$file} {$type} : unsuported MongoDB attribute filter");
+                    break;
             }
         }
 
-        return $result;
+        return $this->_result;
+    }
+
+    /**
+     * Convert sql magento operators to mongo operators
+     *
+     * @param string $operator SqlMagento Operator
+     *
+     * @return string
+     */
+    protected function _convertOperator($operator)
+    {
+        if (isset($this->_operatorsMap[$operator])) {
+            $operator = $this->_operatorsMap[$operator];
+        }
+        return $operator;
+    }
+
+    /**
+     * Set result array as into class member
+     *
+     * @param array $result
+     *
+     * @return void
+     */
+    protected function _setResultArray(array $result){
+        $this->_result = $result;
+    }
+
+    /**
+     * Add new conditions to common array
+     *
+     * @param array $conditions
+     * @param int   $scoped
+     *
+     * @return void
+     */
+    protected function _addToResult(array $conditions, $scoped = 0)
+    {
+        $this->_result[static::MONGO_OPERATOR_OR][$scoped]['$and'][] = $conditions;
     }
 
     /**

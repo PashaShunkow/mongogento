@@ -29,6 +29,11 @@
         </Smile_MongoCatalog>
     </modules>
     <global>
+        <helpers>
+            <smile_mongocatalog>
+                <class>Smile_MongoCatalog_Helper</class>
+            </smile_mongocatalog>
+        </helpers>
         <models>
             <mongocatalog>
                 <class>Smile_MongoCatalog_Model</class>

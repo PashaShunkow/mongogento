@@ -338,7 +338,7 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product extends Mage_Ca
             $type  = strtolower($attribute->getBackendType());
 
             // Handle numeric cast to float
-            $value = $this->_prepareTableValueForSave($value, $attribute->getBackendType());
+            $value = $this->_prepareTableValueForSave($value, $attribute->getBackendType(), true);
 
             if ($type == "int") {
                 // Ensure int storage is correct
@@ -387,6 +387,8 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product extends Mage_Ca
             //    if field exists into current store use it
             //    else look for it into the default store
             $attributeData = array();
+            /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
+            $dateHelper = Mage::helper('smile_mongocatalog/date');
 
             if ($loadedData) {
                 foreach ($loadedData as $storeId => $attributeValues) {
@@ -395,6 +397,9 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product extends Mage_Ca
                             $attributeValues = array($storeId=>$attributeValues);
                         }
                         foreach ($attributeValues as $attributeCode => $value) {
+                            if ($value instanceof MongoDate) {
+                                $value = $dateHelper->getDateTimeFormat($value);
+                            }
                             $attributeData[$attributeCode] = $value;
                         }
                     }
@@ -632,6 +637,30 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product extends Mage_Ca
         $collection->update($updateCond, $updateData, array('upsert' => true));
 
         return $this;
+    }
+
+    /**
+     * Prepare value for save
+     *
+     * @param mixed  $value Attribute value
+     * @param string $type  Attribute backend type
+     * @param bool   $mongoMode set true for Mongo operations
+     *
+     * @return mixed
+     */
+    protected function _prepareTableValueForSave($value, $type, $mongoMode = false){
+        if($mongoMode){
+            $type = strtolower($type);
+            if ($type == 'decimal' || $type == 'numeric' || $type == 'float') {
+                $value = Mage::app()->getLocale()->getNumber($value);
+            }
+            if($type == 'datetime') {
+                $value = Mage::helper('smile_mongocatalog/date')->getMongoDateFormat($value);
+            }
+        }else{
+            $value = parent::_prepareTableValueForSave($value, $type);
+        }
+        return $value;
     }
 
 }
