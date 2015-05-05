@@ -326,11 +326,7 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
             while ($cursor->hasNext()) {
                 $document = $cursor->getNext();
                 $documentIds[] = $document['_id'];
-                var_dump($document);
             }
-            //$log = $cursor->explain();
-            //var_dump(json_encode($log['queryPlanner']['parsedQuery']));
-            die('1');
 
             $this->getSelect()->where('e.entity_id IN(?)', $documentIds);
         }
@@ -339,7 +335,7 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
     /**
      * Build Mongo filter for a an attribute. Following Magento filters are supported :
      *
-     * - array("from" => $fromValue, "to" => $toValue)    [NOT IMPLEMENTED]
+     * - array("from" => $fromValue, "to" => $toValue)    [OK]
      * - array("eq" => $equalValue)                       [OK]
      * - array("neq" => $notEqualValue)                   [OK]
      * - array("like" => $likeValue)                      [OK]
