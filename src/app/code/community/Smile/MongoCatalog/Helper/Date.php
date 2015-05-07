@@ -5,7 +5,7 @@
  * @category  Smile
  * @package   Smile_MongoCatalog
  * @author    Paul Shunkow <pashu@smile.fr>
- * @copyright 2014 Smile
+ * @copyright 2015 Smile
  */
 class Smile_MongoCatalog_Helper_Date extends Mage_Core_Helper_Abstract
 {
