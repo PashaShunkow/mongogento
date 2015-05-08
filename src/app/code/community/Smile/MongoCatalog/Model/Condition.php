@@ -47,7 +47,8 @@ class Smile_MongoCatalog_Model_Condition extends Varien_Object implements Smile_
         'notnull'  => 'ne',
         'not null' => 'ne',
         'to'       => 'lt',
-        'like'     => 'regexp',
+        'like'     => 'regex',
+        'regexp'   => 'regex',
         'finset'   => 'in'
     );
 
