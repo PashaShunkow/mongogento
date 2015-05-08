@@ -27,18 +27,6 @@
 class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection extends Mage_Catalog_Model_Resource_Product_Collection
 {
     /**
-     * Mongo logic operators
-     */
-    const MONGO_OPERATOR_OR  = '$or';
-    const MONGO_OPERATOR_AND = '$and';
-
-    /**
-     * Types of filter conditions
-     */
-    const CONDITION_TYPE_DEFAULT = 'DEFAULT';
-    const CONDITION_TYPE_OR      = 'OR';
-    const CONDITION_TYPE_AND     = 'AND';
-    /**
      * This collection is used to access to the product collection into MongoDB
      *
      * @var MongoCollection
@@ -73,30 +61,6 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
      * Default not loaded, the id remain interger
      */
     protected $_addMainCategories = false;
-
-    /**
-     * Result array with filter conditions
-     *
-     * @var array
-     */
-    protected $_result = array();
-
-    /**
-     * Mongo equivalents of Magento Sql operators
-     *
-     * @var array
-     */
-    protected $_operatorsMap = array(
-        'gteq'    => 'gte',
-        'moreq'   => 'gte',
-        'from'    => 'gte',
-        'lteq'    => 'lte',
-        'neq'     => 'ne',
-        'notnull' => 'ne',
-        'to'      => 'lt',
-        'like'    => 'regexp',
-        'finset'  => 'in'
-    );
 
      /**
      * Set flag to load main category
@@ -252,7 +216,7 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
                 }
             }
             if(empty($sqlArr)){
-                $this->_addDocumentFilter($attribute, $condition, $this->_getConditionType($attribute));
+                $this->_addDocumentFilter($this->_buildFilter($attribute, $condition));
             }else{
                 $conditionSql = '('.implode(') OR (', $sqlArr).')';
             }
@@ -264,7 +228,7 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
             if ($this->getAttribute($attribute) === false || in_array($attribute, $sqlAttributes)) {
                 $conditionSql = $this->_getAttributeConditionSql($attribute, $condition, $joinType);
             } else {
-                $this->_addDocumentFilter($attribute, $condition, $this->_getConditionType($attribute, $condition));
+                $this->_addDocumentFilter($this->_buildFilter($attribute, $condition));
             }
         }
 
@@ -277,49 +241,27 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
     }
 
     /**
-     * Return condition type based on condition structure
+     * Return filter object for condition
      *
-     * @param mixed      $attribute
-     * @param null|array $condition
+     * @param mixed $attribute Attribute data
+     * @param mixed $condition Condition data
      *
-     * @return string
+     * @return Smile_MongoCatalog_Model_Condition
      */
-    protected function _getConditionType($attribute, $condition = null){
-        $conditionType = static::CONDITION_TYPE_DEFAULT;
-        if(is_array($attribute)){
-            $conditionType = static::CONDITION_TYPE_OR;
-        }
-        if(is_string($attribute) && is_array($condition) && $this->isAssocArray($condition) && count($condition) > 1){
-            $conditionType = static::CONDITION_TYPE_AND;
-        }
-        return $conditionType;
-    }
-
-    /**
-     * Check if array is assoc
-     *
-     * @param array $array Input array
-     *
-     * @return bool
-     */
-    protected function isAssocArray($array)
-    {
-        $keys = array_keys($array);
-        return array_keys($keys) !== $keys;
+    protected function _buildFilter($attribute, $condition){
+        return Mage::getModel('mongocatalog/condition')->initCondition($attribute, $condition);
     }
 
     /**
      * Append a filter to be applied on DOCUMENTS (MongoDB) when loading the collection
      *
-     * @param Mage_Eav_Model_Entity_Attribute_Interface|integer|string|array $attribute      The attribute to be filtered
-     * @param null|string|array                                              $condition      Filter condition array or value
-     * @param string                                                         $conditionType  Show conditional type AND | OR
+     * @param Smile_MongoCatalog_Model_Condition $filter Filter object
      *
      * @return Smile_MongoCore_Model_Resource_Override_Catalog_Product_Collection Self reference
      */
-    protected function _addDocumentFilter($attribute, $condition, $conditionType)
+    protected function _addDocumentFilter(Smile_MongoCatalog_Model_Condition $filter)
     {
-        $this->_documentFilters[][$conditionType] = array('attribute' => $attribute, 'condition' => $condition);
+        $this->_documentFilters[] = $filter;
         return $this;
     }
 
@@ -334,8 +276,8 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
 
         $documentFilter = array();
 
-        foreach ($this->_documentFilters as $attribute ) {
-            $filter = $this->_buildDocumentFilter($attribute);
+        foreach ($this->_documentFilters as $filterData ) {
+            $filter = $this->_buildDocumentFilter($filterData);
 
             if (!is_null($filter)) {
                 $documentFilter[] = $filter;
@@ -379,263 +321,13 @@ class Smile_MongoCatalog_Model_Resource_Override_Catalog_Product_Collection exte
     /**
      * Build Mongo filter for a an attribute. Following Magento filters are supported :
      *
-     * - array("from" => $fromValue, "to" => $toValue)    [OK]
-     * - array("eq" => $equalValue)                       [OK]
-     * - array("neq" => $notEqualValue)                   [OK]
-     * - array("like" => $likeValue)                      [OK]
-     * - array("in" => array($inValues))                  [OK]
-     * - array("nin" => array($notInValues))              [OK]
-     * - array("notnull" => $valueIsNotNull)              [OK]
-     * - array("null" => $valueIsNull)                    [OK]
-     * - array("moreq" => $moreOrEqualValue)              [OK]
-     * - array("gt" => $greaterValue)                     [OK]
-     * - array("lt" => $lessValue)                        [OK]
-     * - array("gteq" => $greaterOrEqualValue)            [OK]
-     * - array("lteq" => $lessOrEqualValue)               [OK]
-     * - array("finset" => $valueInSet)                   [OK]
-     * - array("regexp" => $regularExpression)            [OK]
-     * - array("seq" => $stringValue)                     [OK]
-     * - array("sneq" => $stringValue)                    [OK]
-     *
-     * @param Mage_Eav_Model_Entity_Attribute_Interface|integer|string|array $attribute     The attribute to be filtered, conditions info
+     * @param Smile_MongoCatalog_Model_Condition $filterDataObject The attribute to be filtered, conditions info
      *
      * @return array The Filter to be applied
      */
-    protected function _buildDocumentFilter($attribute)
+    protected function _buildDocumentFilter(Smile_MongoCatalog_Model_Condition $filterDataObject)
     {
-        list($conditionType, $condition, $attributeName) = $this->_getAttributeFilterInfo($attribute);
-
-        $scopedAttributeName = $this->_getDataHelper()->getMongoAttributeName($attributeName, true);
-        $globalAttributeName = $this->_getDataHelper()->getMongoAttributeName($attributeName, false);
-
-        $result = $this->_getQueryArray($conditionType, $globalAttributeName, $scopedAttributeName);
-
-        $conditions = array();
-
-        if ($conditionType == static::CONDITION_TYPE_AND) {
-            /**
-             * Here will be processes code if used 'AND' condition in magento collection
-             * example:
-             *  addAttributeToFilter('my_new_date',
-             *    array('from' => '2014-05-01', 'to' => '2018-04-12')
-             *  );
-             */
-            foreach($condition as $type => $value){
-                $conditions[] = $this->_buildCondition($type, $value);
-            }
-            $conditions = $this->_prepareAndCondition($conditions);
-            $result[static::MONGO_OPERATOR_OR][0]['$and'][] = array($scopedAttributeName => $conditions);
-            $result[static::MONGO_OPERATOR_OR][1]['$and'][] = array($globalAttributeName => $conditions);
-        } else if ($conditionType == static::CONDITION_TYPE_OR) {
-            /**
-             * Here will be processes code if used 'OR' condition in magento collection
-             * example:
-             * addAttributeToFilter(
-             *  array(
-             *   array('attribute'=> 'color','in' => array(23,22)),
-             *   array('attribute'=> 'my_new_date','from' => '2014-05-01')
-             *  )
-             * );
-             */
-            foreach($condition as $item){
-                $attributeName = $item['attribute'];
-                unset($item['attribute']);
-                list($type) = array_keys($item);
-                $value      = $item[$type];
-                $conditions = $this->_buildCondition($type, $value);
-                $scopedAttributeName = $this->_getDataHelper()->getMongoAttributeName($attributeName, true);
-                $globalAttributeName = $this->_getDataHelper()->getMongoAttributeName($attributeName, false);
-
-                $result[static::MONGO_OPERATOR_OR][][static::MONGO_OPERATOR_AND] = array(
-                    array($scopedAttributeName => array('$exists' => 1)),
-                    array($scopedAttributeName => $conditions)
-                );
-                $result[static::MONGO_OPERATOR_OR][][static::MONGO_OPERATOR_AND] = array(
-                    array($scopedAttributeName => array('$exists' => 0)),
-                    array($globalAttributeName => array('$exists' => 1)),
-                    array($globalAttributeName => $conditions)
-                );
-            }
-        } else {
-            /**
-             * Here will be processes code if used 'DEFAULT' condition in magento collection
-             * example:
-             * addAttributeToFilter('attribute', 'value'));
-             * or
-             * addAttributeToFilter('attribute', array('value','value2'));
-             */
-            if (!is_array($condition) || !$this->isAssocArray($condition)) {
-                $condition = array('eq' => $condition);
-            }
-            list($type)   = array_keys($condition);
-            $value        = $condition[$type];
-            $conditions   = $this->_buildCondition($type, $value);
-            $result[static::MONGO_OPERATOR_OR][0][static::MONGO_OPERATOR_AND][] = array($scopedAttributeName => $conditions);
-            $result[static::MONGO_OPERATOR_OR][1][static::MONGO_OPERATOR_AND][] = array($globalAttributeName => $conditions);
-        }
-
-        return $result;
-    }
-
-    protected function _getQueryArray($conditionType, $globalAttributeName, $scopedAttributeName){
-        if ($conditionType == static::CONDITION_TYPE_OR) {
-            $result = array();
-        } else {
-            $result = array(
-                static::MONGO_OPERATOR_OR => array(
-                    array(static::MONGO_OPERATOR_AND => array(
-                        array($scopedAttributeName => array('$exists' => 1)),
-
-                    )),
-                    array(static::MONGO_OPERATOR_AND => array(
-                        array($scopedAttributeName => array('$exists' => 0)),
-                        array($globalAttributeName => array('$exists' => 1)),
-                    )),
-                )
-            );
-        }
-        return $result;
-    }
-
-    /**
-     * Convert attribute data into attribute info array
-     *
-     * @param array $attribute Attribute data array
-     *
-     * @return array
-     */
-    protected function _getAttributeFilterInfo(array $attribute){
-        $info = array();
-        if(isset($attribute[static::CONDITION_TYPE_OR])){
-            $info = array('OR', $attribute[static::CONDITION_TYPE_OR]['attribute'], false);
-        }
-        if(isset($attribute[static::CONDITION_TYPE_AND])){
-            $info = array(static::CONDITION_TYPE_AND, $attribute[static::CONDITION_TYPE_AND]['condition'], $attribute[static::CONDITION_TYPE_AND]['attribute']);
-        }
-        if(isset($attribute[static::CONDITION_TYPE_DEFAULT])){
-            $info = array(static::CONDITION_TYPE_DEFAULT, $attribute[static::CONDITION_TYPE_DEFAULT]['condition'], $attribute[static::CONDITION_TYPE_DEFAULT]['attribute']);
-        }
-        return $info;
-    }
-
-    /**
-     * Build condition for using in Mongo collection
-     *
-     * @param string $type  Condition type
-     * @param mixed  $value Condition value
-     *
-     * @return array|null
-     */
-    protected function _buildCondition($type, $value){
-        $condition = array();
-        switch ($type) {
-            case 'like':
-                $regexp    = new MongoRegex('/' . str_replace(array('\'%','%\''), '.*', $value) . '/i');
-                $condition = array($this->_convertOperator($type) => $regexp);
-                break;
-            case 'eq':
-                if(is_array($value)){
-                    $condition = array($this->_convertOperator('in') => $value);
-                }else{
-                    $condition = $value;
-                }
-                break;
-            case 'gt':
-            case 'gteq':
-            case 'lt':
-            case 'lteq':
-            case 'moreq':
-            case 'neq':
-            case 'in':
-            case 'nin':
-            case 'finset':
-                $condition = array($this->_convertOperator($type) => $value);
-                break;
-            case 'notnull':
-                $condition = array($this->_convertOperator($type) => null);
-                break;
-            case 'null':
-                $condition = null;
-                break;
-            case 'regexp':
-                $regexp    = new MongoRegex('/' . $condition[$type] . '/i');
-                $condition = array($this->_convertOperator($type) => $regexp);
-                break;
-            case 'seq':
-                if ($value == '') {
-                    $condition = null;
-                } else {
-                    $condition = $value;
-                }
-                break;
-            case 'sneq':
-                if ($condition[$type] == '') {
-                    $type      = '$ne';
-                    $condition = array($type => null);
-                } else {
-                    $condition = array($this->_convertOperator($type) => (string) $value);
-                }
-                break;
-            case 'from':
-                /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
-                $dateHelper = Mage::helper('smile_mongocatalog/date');
-                $condition  = array($this->_convertOperator($type) => $dateHelper->getMongoDateFormat((string) $value));
-                break;
-            case 'to':
-                /** @var $dateHelper Smile_MongoCatalog_Helper_Date */
-                $dateHelper = Mage::helper('smile_mongocatalog/date');
-                $condition  = array($this->_convertOperator($type) => $dateHelper->getMongoDateFormat((string) $value));
-                break;
-            default:
-                // @FIX
-                $file = __FILE__;
-                Mage::throwException("{$file} {$type} : unsuported MongoDB attribute filter");
-                break;
-        }
-
-        return $condition;
-    }
-
-    /**
-     * Convert sql magento operators to mongo operators
-     *
-     * @param string $operator SqlMagento Operator
-     *
-     * @return string
-     */
-    protected function _convertOperator($operator)
-    {
-        if (isset($this->_operatorsMap[$operator])) {
-            $operator = $this->_operatorsMap[$operator];
-        }
-        return sprintf('$%s', $operator);
-    }
-
-    /**
-     * Prepare condition array for use in Mongo as 'and' condition
-     * for one attribute
-     *
-     * @param array $conditionsArray
-     *
-     * @return array
-     */
-    protected function _prepareAndCondition(array $conditionsArray){
-        foreach($conditionsArray as $key => $condition){
-            foreach($condition as $conditionKey => $conditionValue){
-                $conditionsArray[$conditionKey] = $conditionValue;
-            }
-            unset($conditionsArray[$key]);
-        }
-        return $conditionsArray;
-    }
-
-    /**
-     * Return MongoCatalog data helper
-     *
-     * @return Smile_MongoCatalog_Helper_Data
-     */
-    protected function _getDataHelper(){
-        return Mage::helper('smile_mongocatalog');
+        return $filterDataObject->getQueryArray();
     }
 
     /**
